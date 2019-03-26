@@ -16,6 +16,7 @@ type Source struct {
 
 	Username string `json:"username"`
 	Password string `json:"password"`
+	Ecr      bool   `json:"ecr"`
 
 	Debug bool `json:"debug"`
 }

@@ -35,6 +35,9 @@ differences:
   authenticating to the registry. Must be specified for private repos or when
   using `put`.
 
+* `ecr`: *Optional. Default `false`.* If set, Access Key ID and secret will be 
+  used to authenticate, `username` and `password` will be ignored.
+
 * `debug`: *Optional. Default `false`.* If set, progress bars will be disabled
   and debugging output will be printed instead.
 
