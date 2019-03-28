@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strings"
 
 	resource "github.com/concourse/registry-image-resource"
 	color "github.com/fatih/color"
@@ -70,6 +71,35 @@ func main() {
 		logrus.Errorf("failed to resolve name: %s", err)
 		os.Exit(1)
 		return
+	}
+
+	if req.Source.Ecr {
+		mySession := session.Must(session.NewSession())
+		client := ecr.New(mySession, aws.NewConfig().WithRegion("eu-west-2"))
+		input := &ecr.GetAuthorizationTokenInput{}
+		result, err := client.GetAuthorizationToken(input)
+		if err != nil {
+			if aerr, ok := err.(awserr.Error); ok {
+				switch aerr.Code() {
+				case ecr.ErrCodeServerException:
+					fmt.Println(ecr.ErrCodeServerException, aerr.Error())
+				case ecr.ErrCodeInvalidParameterException:
+					fmt.Println(ecr.ErrCodeInvalidParameterException, aerr.Error())
+				default:
+					fmt.Println(aerr.Error())
+				}
+			} else {
+				// Print the error, cast err to awserr.Error to get the Code and
+				// Message from an error.
+				fmt.Println(err.Error())
+			}
+			return
+		}
+
+		// Update username, password and repository
+		req.Source.Username = "AWS"
+		req.Source.Password = *result.AuthorizationData[0].AuthorizationToken
+		req.Source.Repository = strings.Join([]string{strings.Replace(*result.AuthorizationData[0].ProxyEndpoint, "https://", "", -1), req.Source.Repository}, "/")
 	}
 
 	fmt.Fprintf(os.Stderr, "fetching %s@%s\n", color.GreenString(req.Source.Repository), color.YellowString(req.Version.Digest))
