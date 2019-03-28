@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -51,8 +52,6 @@ func main() {
 		mySession := session.Must(session.NewSession())
 		client := ecr.New(mySession, aws.NewConfig().WithRegion("eu-west-2"))
 		input := &ecr.GetAuthorizationTokenInput{}
-		ecrRepo := []string{req.Source.Repository}
-		input.SetRegistryIds(ecrRepo)
 		result, err := client.GetAuthorizationToken(input)
 		if err != nil {
 			if aerr, ok := err.(awserr.Error); ok {
@@ -71,9 +70,11 @@ func main() {
 			}
 			return
 		}
-		fmt.Println(result)
+
+		// Update username, password and repository
 		req.Source.Username = "AWS"
-		req.Source.Password = result.GoString()
+		req.Source.Password = *result.AuthorizationData[0].AuthorizationToken
+		req.Source.Repository = strings.Join([]string{strings.Replace(*result.AuthorizationData[0].ProxyEndpoint, "https://", "", -1), req.Source.Repository}, "/")
 	}
 
 	auth := &authn.Basic{
