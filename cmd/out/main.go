@@ -113,16 +113,16 @@ func main() {
 			if aerr, ok := err.(awserr.Error); ok {
 				switch aerr.Code() {
 				case ecr.ErrCodeServerException:
-					fmt.Println(ecr.ErrCodeServerException, aerr.Error())
+					logrus.Errorf(ecr.ErrCodeServerException, aerr.Error())
 				case ecr.ErrCodeInvalidParameterException:
-					fmt.Println(ecr.ErrCodeInvalidParameterException, aerr.Error())
+					logrus.Errorf(ecr.ErrCodeInvalidParameterException, aerr.Error())
 				default:
-					fmt.Println(aerr.Error())
+					logrus.Errorf(aerr.Error())
 				}
 			} else {
 				// Print the error, cast err to awserr.Error to get the Code and
 				// Message from an error.
-				fmt.Println(err.Error())
+				logrus.Errorf(err.Error())
 			}
 			return
 		}
