@@ -15,7 +15,7 @@ differences:
 
 * This resource does not and will never support building - only registry image
   pushing/pulling. Building should instead be done with something like the
-  [`concourse/builder` task](https://github.com/concourse/builder) (or anything
+  [`builder` task](https://github.com/concourse/builder-task) (or anything
   that can produce OCI image tarballs).
 
 * A goal of this resource is to stay as focused and simple as possible. The
@@ -48,6 +48,13 @@ differences:
 * `debug`: *Optional. Default `false`.* If set, progress bars will be disabled
   and debugging output will be printed instead.
 
+* `content_trust`: *Optional.* Configuration about content trust.
+  * `server`: *Optional.* URL for the notary server. (equal to `DOCKER_CONTENT_TRUST_SERVER`)
+  * `repository_key_id`: *Required.* Target key's ID used to sign the trusted collection, could be retrieved by `notary key list`
+  * `repository_key`: *Required.* Target key used to sign the trusted collection.
+  * `repository_passphrase`: *Required.* The passphrase of the signing/target key. (equal to `DOCKER_CONTENT_TRUST_REPOSITORY_PASSPHRASE`)
+  * `tls_key`: *Optional. Default `""`* TLS key for the notary server.
+  * `tls_cert`: *Optional. Default `""`* TLS certificate for the notary server.
 
 ## Behavior
 
