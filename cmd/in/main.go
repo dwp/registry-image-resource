@@ -86,7 +86,7 @@ func main() {
 		Password: req.Source.Password,
 	}
 
-	imageOpts := []remote.ImageOption{
+	imageOpts := []remote.Option{
 		remote.WithTransport(resource.RetryTransport),
 	}
 
@@ -177,14 +177,8 @@ func rootfsFormat(dest string, req InRequest, image v1.Image) {
 	}
 
 	env := cfg.Config.Env
-	if len(env) == 0 {
-		env = cfg.ContainerConfig.Env
-	}
 
 	user := cfg.Config.User
-	if user == "" {
-		user = cfg.ContainerConfig.User
-	}
 
 	err = json.NewEncoder(meta).Encode(ImageMetadata{
 		Env:  env,

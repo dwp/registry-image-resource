@@ -94,8 +94,24 @@ func main() {
 	}
 
 	imagePath := filepath.Join(src, req.Params.Image)
+	matches, err := filepath.Glob(imagePath)
+	if err != nil {
+		logrus.Errorf("failed to glob path '%s': %s", req.Params.Image, err)
+		os.Exit(1)
+		return
+	}
+	if len(matches) == 0 {
+		logrus.Errorf("no files match glob '%s'", req.Params.Image)
+		os.Exit(1)
+		return
+	}
+	if len(matches) > 1 {
+		logrus.Errorf("too many files match glob '%s'", req.Params.Image)
+		os.Exit(1)
+		return
+	}
 
-	img, err := tarball.ImageFromPath(imagePath, nil)
+	img, err := tarball.ImageFromPath(matches[0], nil)
 	if err != nil {
 		logrus.Errorf("could not load image from path '%s': %s", req.Params.Image, err)
 		os.Exit(1)
@@ -116,7 +132,7 @@ func main() {
 		Password: req.Source.Password,
 	}
 
-	err = remote.Write(ref, img, auth, resource.RetryTransport)
+	err = remote.Write(ref, img, remote.WithAuth(auth), remote.WithTransport(resource.RetryTransport))
 	if err != nil {
 		logrus.Errorf("failed to upload image: %s", err)
 		os.Exit(1)
@@ -148,7 +164,7 @@ func main() {
 	for _, extraRef := range extraRefs {
 		logrus.Infof("tagging %s with %s", digest, extraRef.Identifier())
 
-		err = remote.Write(extraRef, img, auth, http.DefaultTransport)
+		err = remote.Write(extraRef, img, remote.WithAuth(auth), remote.WithTransport(http.DefaultTransport))
 		if err != nil {
 			logrus.Errorf("failed to tag image: %s", err)
 			os.Exit(1)
