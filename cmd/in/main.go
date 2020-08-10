@@ -78,7 +78,7 @@ func main() {
 
 	dest := os.Args[1]
 
-	if req.Source.AwsAccessKeyId != "" && req.Source.AwsSecretAccessKey != "" && req.Source.AwsRegion != "" {
+	if req.Source.AwsAccessKeyId != "" || req.Source.AwsSecretAccessKey != "" || req.Source.AwsRegion != "" || req.Source.AwsRoleArn != "" {
 		if !req.Source.AuthenticateToECR() {
 			os.Exit(1)
 			return
