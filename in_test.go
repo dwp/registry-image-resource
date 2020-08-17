@@ -112,11 +112,11 @@ var _ = Describe("In", func() {
 		It("returns metadata", func() {
 			Expect(res.Version).To(Equal(req.Version))
 			Expect(res.Metadata).To(Equal([]resource.MetadataField{
-				resource.MetadataField{
+				{
 					Name:  "repository",
 					Value: "concourse/test-image-metadata",
 				},
-				resource.MetadataField{
+				{
 					Name:  "tag",
 					Value: "latest",
 				},
@@ -125,17 +125,28 @@ var _ = Describe("In", func() {
 	})
 
 	Describe("file attributes", func() {
+		var stat os.FileInfo
+
 		BeforeEach(func() {
 			req.Source.Repository = "concourse/test-image-file-perms-mtime"
 			req.Version.Digest = latestDigest(req.Source.Repository)
 		})
 
-		It("keeps file ownership, permissions, and modified times", func() {
-			stat, err := os.Stat(rootfsPath("home", "alex", "birthday"))
+		JustBeforeEach(func() {
+			var err error
+			stat, err = os.Stat(rootfsPath("home", "alex", "birthday"))
 			Expect(err).ToNot(HaveOccurred())
+		})
 
+		It("keeps file permissions and file modified times", func() {
 			Expect(stat.Mode()).To(Equal(os.FileMode(0603)))
 			Expect(stat.ModTime()).To(BeTemporally("==", time.Date(1991, 06, 03, 05, 30, 30, 0, time.UTC)))
+		})
+
+		It("keeps file ownership", func() {
+			if os.Geteuid() != 0 {
+				Skip("Must be run as root to validate file ownership")
+			}
 
 			sys, ok := stat.Sys().(*syscall.Stat_t)
 			Expect(ok).To(BeTrue())
@@ -222,8 +233,10 @@ var _ = Describe("In", func() {
 				Repository: dockerPrivateRepo,
 				RawTag:     "latest",
 
-				Username: dockerPrivateUsername,
-				Password: dockerPrivatePassword,
+				BasicCredentials: resource.BasicCredentials{
+					Username: dockerPrivateUsername,
+					Password: dockerPrivatePassword,
+				},
 			}
 
 			checkDockerPrivateUserConfigured()
@@ -317,6 +330,31 @@ var _ = Describe("In", func() {
 		})
 	})
 
+	Describe("skips the download", func() {
+		BeforeEach(func() {
+			req.Source.Repository = "concourse/test-image-static"
+			req.Params.SkipDownload = true
+			req.Version.Digest = LATEST_STATIC_DIGEST
+		})
+
+		It("does not save any files", func() {
+			_, err := os.Stat(filepath.Join(destDir, "rootfs"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+
+			_, err = os.Stat(filepath.Join(destDir, "manifest.json"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+
+			_, err = os.Stat(filepath.Join(destDir, "digest"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+
+			_, err = os.Stat(filepath.Join(destDir, "tag"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+
+			_, err = os.Stat(filepath.Join(destDir, "image.tar"))
+			Expect(os.IsNotExist(err)).To(BeTrue())
+		})
+	})
+
 	Context("when the registry returns 429 Too Many Requests", func() {
 		var registry *ghttp.Server
 
@@ -368,15 +406,7 @@ var _ = Describe("In", func() {
 					ghttp.RespondWith(http.StatusTooManyRequests, "calm down"),
 				),
 
-				// successful sequence
-				ghttp.CombineHandlers(
-					ghttp.VerifyRequest("GET", "/v2/"),
-					ghttp.RespondWith(http.StatusOK, `welcome to zombocom`),
-				),
-				ghttp.CombineHandlers(
-					ghttp.VerifyRequest("GET", "/v2/fake-image/manifests/"+digest.String()),
-					ghttp.RespondWith(http.StatusOK, manifest),
-				),
+				// successful sequence following a pseudo-checkpoint
 				ghttp.CombineHandlers(
 					ghttp.VerifyRequest("GET", "/v2/fake-image/blobs/"+configDigest.String()),
 					ghttp.RespondWith(http.StatusOK, config),
@@ -396,6 +426,151 @@ var _ = Describe("In", func() {
 
 		It("retries", func() {
 			Expect(res.Version).To(Equal(req.Version))
+		})
+	})
+
+	Describe("uses a mirror", func() {
+		var mirror *ghttp.Server
+
+		BeforeEach(func() {
+			mirror = ghttp.NewServer()
+		})
+
+		AfterEach(func() {
+			mirror.Close()
+		})
+
+		Context("which has the image", func() {
+			Context("in an explicit namespace", func() {
+				BeforeEach(func() {
+					// use the mock mirror as the "origin", use Docker Hub as a "mirror"
+					req.Source.Repository = mirror.Addr() + "/concourse/test-image-static"
+					req.Source.RegistryMirror = &resource.RegistryMirror{
+						Host: name.DefaultRegistry,
+					}
+
+					req.Version.Digest = LATEST_STATIC_DIGEST
+				})
+
+				It("saves the rootfs and metadata", func() {
+					_, err := os.Stat(rootfsPath("Dockerfile"))
+					Expect(err).ToNot(HaveOccurred())
+
+					_, err = ioutil.ReadFile(filepath.Join(destDir, "digest"))
+					Expect(err).ToNot(HaveOccurred())
+
+					_, err = ioutil.ReadFile(filepath.Join(destDir, "tag"))
+					Expect(err).ToNot(HaveOccurred())
+				})
+			})
+
+			Context("in an implied namespace", func() {
+				BeforeEach(func() {
+					fakeImage := empty.Image
+
+					digest, err := fakeImage.Digest()
+					Expect(err).ToNot(HaveOccurred())
+
+					manifest, err := fakeImage.RawManifest()
+					Expect(err).ToNot(HaveOccurred())
+
+					config, err := fakeImage.RawConfigFile()
+					Expect(err).ToNot(HaveOccurred())
+
+					configDigest, err := fakeImage.ConfigName()
+					Expect(err).ToNot(HaveOccurred())
+
+					mirror.AppendHandlers(
+						ghttp.CombineHandlers(
+							ghttp.VerifyRequest("GET", "/v2/"),
+							ghttp.RespondWith(http.StatusOK, `welcome to zombocom`),
+						),
+						ghttp.CombineHandlers(
+							ghttp.VerifyRequest("GET", "/v2/library/fake-image/manifests/"+digest.String()),
+							ghttp.RespondWith(http.StatusOK, manifest),
+						),
+						ghttp.CombineHandlers(
+							ghttp.VerifyRequest("GET", "/v2/library/fake-image/blobs/"+configDigest.String()),
+							ghttp.RespondWith(http.StatusOK, config),
+						),
+					)
+
+					req.Source = resource.Source{
+						Repository: "fake-image",
+						RegistryMirror: &resource.RegistryMirror{
+							Host: mirror.Addr(),
+						},
+					}
+
+					req.Version.Digest = digest.String()
+				})
+
+				It("pulls the image from the library", func() {
+					Expect(res.Version).To(Equal(req.Version))
+				})
+			})
+		})
+
+		Context("which is missing the image", func() {
+			BeforeEach(func() {
+				req.Source.RegistryMirror = &resource.RegistryMirror{
+					Host: mirror.Addr(),
+				}
+			})
+
+			Context("in an explicit namespace", func() {
+				BeforeEach(func() {
+					req.Source.Repository = "concourse/test-image-static"
+
+					req.Version.Digest = LATEST_STATIC_DIGEST
+
+					mirror.AppendHandlers(
+						ghttp.CombineHandlers(
+							ghttp.VerifyRequest("GET", "/v2/"),
+							ghttp.RespondWith(http.StatusOK, `welcome to zombocom`),
+						),
+						ghttp.CombineHandlers(
+							ghttp.VerifyRequest("GET", "/v2/concourse/test-image-static/manifests/"+req.Version.Digest),
+							ghttp.RespondWith(http.StatusNotFound, nil),
+						),
+					)
+				})
+
+				It("saves the rootfs and metadata", func() {
+					_, err := os.Stat(rootfsPath("Dockerfile"))
+					Expect(err).ToNot(HaveOccurred())
+
+					_, err = ioutil.ReadFile(filepath.Join(destDir, "digest"))
+					Expect(err).ToNot(HaveOccurred())
+
+					_, err = ioutil.ReadFile(filepath.Join(destDir, "tag"))
+					Expect(err).ToNot(HaveOccurred())
+				})
+			})
+
+			Context("in an implied namespace", func() {
+				BeforeEach(func() {
+					req.Source.Repository = "busybox"
+
+					req.Version.Digest = latestDigest(req.Source.Repository)
+
+					mirror.AppendHandlers(
+						ghttp.CombineHandlers(
+							ghttp.VerifyRequest("GET", "/v2/"),
+							ghttp.RespondWith(http.StatusOK, `welcome to zombocom`),
+						),
+						ghttp.CombineHandlers(
+							ghttp.VerifyRequest("GET", "/v2/library/busybox/manifests/"+req.Version.Digest),
+							ghttp.RespondWith(http.StatusNotFound, nil),
+						),
+					)
+
+				})
+
+				It("pulls the image from the library", func() {
+					Expect(res.Version).To(Equal(req.Version))
+				})
+			})
 		})
 	})
 })

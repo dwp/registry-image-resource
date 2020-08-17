@@ -54,6 +54,11 @@ differences:
 * `debug`: *Optional. Default `false`.* If set, progress bars will be disabled
   and debugging output will be printed instead.
 
+* `registry_mirror`: *Optional.*
+  * `host`: *Required.* A hostname pointing to a Docker registry mirror service.
+  * `username` and `password`: *Optional.* A username and password to use when
+  authenticating to the mirror.
+
 * `content_trust`: *Optional.* Configuration about content trust.
   * `server`: *Optional.* URL for the notary server. (equal to `DOCKER_CONTENT_TRUST_SERVER`)
   * `repository_key_id`: *Required.* Target key's ID used to sign the trusted collection, could be retrieved by `notary key list`
@@ -61,6 +66,46 @@ differences:
   * `repository_passphrase`: *Required.* The passphrase of the signing/target key. (equal to `DOCKER_CONTENT_TRUST_REPOSITORY_PASSPHRASE`)
   * `tls_key`: *Optional. Default `""`* TLS key for the notary server.
   * `tls_cert`: *Optional. Default `""`* TLS certificate for the notary server.
+
+### Signing with Docker Hub 
+
+Configure Docker Content Trust for use with the [Docker Hub](https:/hub.docker.io) and Notary service by specifying the above source parameters as follows:
+
+* `repository_key` should be set to the contents of the DCT key file located in your ~/.docker/trust/private directory.
+* `repository_key_id` should be set to the full key itself, which is also the filename of the key file mentioned above, without the .key extension.
+
+Consider the following resource:
+
+```yaml
+resources:
+- name: trusted-image
+  type: registry-image
+  source:
+    repository: docker.io/foo/bar
+    username: ((registry_user))
+    password: ((registry_pass))
+    content_trust:
+      repository_key_id: ((registry_key_id))
+      repository_key: ((registry_key))
+      repository_passphrase: ((registry_passphrase))
+```
+
+Specify the values for these variables as shown in the following static variable file, or preferrably in a configured [credential manager](https://concourse-ci.org/creds.html):
+
+```yaml
+registry_user: jertel
+registry_pass: my_docker_hub_token
+registry_passphrase: my_dct_key_passphrase
+registry_key_id: 1452a842871e529ffc2be29a012618e1b2a0e6984a89e92e34b5a0fc21a04cd
+registry_key: |
+  -----BEGIN ENCRYPTED PRIVATE KEY-----
+  role: jertel
+
+  MIhsj2sd41fwaa...
+  -----END ENCRYPTED PRIVATE KEY-----
+```
+
+**NOTE** This configuration only applies to the `out` action. `check` & `in` aren't impacted. Hence, it would be possible to `check` or use `in` to get unsigned images.
 
 ## Behavior
 
@@ -77,6 +122,8 @@ Fetches an image at a digest.
 #### Parameters
 
 * `format`: *Optional. Default `rootfs`.* The format to fetch as.
+* `skip_download`: *Optional. Default `false`.* Skip downloading the image.
+  Useful only to trigger a job without using the object.
 
 #### Files created by the resource
 
@@ -112,8 +159,8 @@ In this format, the resource will produce the following files:
 ### `out`: Push an image up to the registry under the given tags.
 
 Uploads an image to the registry under the tag configured in `source`.
- 
-If `additional_tags` param is defined then the uploaded image will also be 
+
+If `additional_tags` param is defined then the uploaded image will also be
 tagged with each one of the values specified in that file.
 
 The currently encouraged way to build these images is by using the
@@ -126,6 +173,29 @@ The currently encouraged way to build these images is by using the
 * `additional_tags`: *Optional.* The path to a file with whitespace-separated
   list of tag values to tag the image with (in addition to the tag configured
   in `source`).
+
+### Use in tasks
+
+Images used as
+[image resources](https://concourse-ci.org/tasks.html#schema.task.image_resource)
+in tasks are called
+[anonymous resources](https://concourse-ci.org/tasks.html#schema.anonymous_resource).
+Anonymous resources can specify
+[a version](https://concourse-ci.org/tasks.html#schema.anonymous_resource.version),
+which is the image digest. For example:
+
+
+```
+image_resource:
+  type: docker-image
+  source:
+    repository: golang
+  version:
+    digest: 'sha256:5f640aeb8b78e9876546a9d06b928d2ad0c6e51900bcba10ff4e12dc57f6f265'
+```
+
+This is useful when the registry image does not have tags, or when the tags are
+going to be re-used.
 
 ## Development
 
@@ -152,7 +222,7 @@ docker build -t registry-image-resource -f dockerfiles/ubuntu/Dockerfile .
 
 #### Integration tests
 
-The integration requires 2 docker repos, one private and one public. The `docker build` 
+The integration requires 2 docker repos, one private and one public. The `docker build`
 step requires setting `--build-args` so the integration will run.
 
 Run the tests with the following command:
